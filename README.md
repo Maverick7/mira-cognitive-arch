@@ -1,4 +1,4 @@
-# Mira: A Neuro-Symbolic Cognitive Architecture for Human-AI Symbiosis
+# M.I.R.A. (Multi-agent Intelligent Reasoning Architecture)
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.40%2B-red.svg)](https://streamlit.io/)
@@ -6,7 +6,7 @@
 
 ## Abstract
 
-**Mira** is a prototype **Cognitive Architecture** designed to explore the frontiers of personalized Human-AI interaction. Unlike standard LLM chatbots which rely on a single inference pass, Mira implements a **Bicameral System** (Fast vs. Slow Thinking) and a **Multi-Agent Council** to simulate deeper reasoning, introspection, and emotional continuity.
+**M.I.R.A.** is a prototype **Cognitive Architecture** designed to explore the frontiers of personalized Human-AI interaction. unlike standard LLM chatbots which rely on a single inference pass, M.I.R.A. implements a **Bicameral System** (Fast vs. Slow Thinking) and a **Multi-Agent Council** to simulate deeper reasoning, introspection, and emotional continuity.
 
 The system is engineered to foster a long-term symbiotic relationship with the user, maintaining a persistent self-narrative, evolving emotional states, and stratified memory (Short-term, Condensed, and Vector-based Long-term Memory).
 
@@ -103,7 +103,7 @@ Mira maintains a continuous **Internal Monologue** (`self_narrative.jsonl`). She
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/mira-cognitive-arch.git
+git clone https://github.com/Maverick7/mira-cognitive-arch.git
 
 # Install dependencies
 pip install -r requirements.txt

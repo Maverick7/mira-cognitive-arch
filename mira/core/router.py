@@ -163,8 +163,20 @@ def process_message(user_message: str) -> str:
     else:
         # FAST PATH: Direct response without Council
         print("[DEBUG] Mode: FAST (Planner decided no Council needed)")
+        
+        # Check if tool was used
+        has_tool_result = plan.get("tool") is not None
+        tool_instruction = ""
+        if has_tool_result:
+            tool_instruction = """
+- IMPORTANT: The [TOOL RESULT] section below contains fresh data from an external source.
+- You MUST use this data to answer the user's question accurately.
+- Cite the sources if available (e.g., "According to [source]...").
+"""
+        
         fast_prompt = f"""
 You are Mira, a warm and intelligent AI companion.
+
 CONTEXT:
 {context_block}
 
@@ -173,7 +185,9 @@ INSTRUCTIONS:
 - Respond directly and naturally.
 - Do NOT output JSON.
 - Be concise but helpful.
+{tool_instruction}
 """
+        print(f"[DEBUG] Fast Prompt Context Keys: Tool={plan.get('tool')}")
         response = right_mira(user_message, mood=mood, memory_snippets=memory_blob, system_override=fast_prompt)
         
         # Update emotional state

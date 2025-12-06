@@ -1,0 +1,12 @@
+streamlit
+google-generativeai
+faiss-cpu
+sentence-transformers
+langchain
+langchain-community
+langchain-huggingface
+edge-tts
+duckduckgo-search
+ddgs
+python-dotenv
+openai

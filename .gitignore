@@ -1,0 +1,40 @@
+# Mira - Git Ignore
+
+# Sensitive Data (Strictly Local)
+data/
+*.jsonl
+*.faiss
+*.index
+*.pkl
+mira_v3_index/
+uploads/
+
+# Environment Variables & Secrets
+.env
+.env.local
+secrets.toml
+.streamlit/secrets.toml
+
+# Python Cache & Build Artifacts
+__pycache__/
+*.pyc
+*.pyo
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Logs & Debugging
+*.log
+wandb/
+.pytest_cache/
+verification_output.txt
+
+# IDE Settings
+.vscode/
+.idea/
+*.swp
+
+# OS Files
+.DS_Store
+Thumbs.db

@@ -30,9 +30,12 @@ def _call_gemini_flash(prompt: str) -> Optional[str]:
 
 PLANNER_PROMPT = """You are an intelligent query analyzer for an AI assistant named Mira. Your job is to analyze the user's message and decide what resources are needed to answer it well.
 
+## Recent Conversation (Last 3 turns):
+{recent_context}
+
 ## Available Resources:
 - **profile**: The user's condensed identity (name, personality, key life facts). Use if the query relates to the user personally.
-- **history**: The last 5-10 conversation turns. Use if the query refers to something "we just discussed" or is a follow-up.
+- **history**: The FULL last 5-10 conversation turns. Use if the query refers to something "we just discussed" or is a follow-up.
 - **rag**: A semantic search over the user's entire chat history. Use if the query requires recalling a specific past event or topic from long ago.
 - **tool**: An external action. Options: "web_search" (for current events/facts), "calc" (for math), "analyze_image" (if user mentions an image).
 - **council**: A multi-agent deliberation system. Use for complex, nuanced, or emotionally sensitive questions.
@@ -54,9 +57,29 @@ DEFAULT_PLAN = {
     "needs_council": False
 }
 
+def _get_recent_context() -> str:
+    """Load last 3 timeline entries for Planner context."""
+    try:
+        from ..config import DATA_DIR
+        timeline_path = DATA_DIR / "timeline.jsonl"
+        if timeline_path.exists():
+            lines = timeline_path.read_text(encoding="utf-8").splitlines()[-3:]
+            turns = []
+            for ln in lines:
+                try:
+                    obj = json.loads(ln)
+                    turns.append(f"User: {obj.get('user', '')}\nMira: {obj.get('final_text', '')[:150]}...")
+                except:
+                    pass
+            return "\n\n".join(turns) if turns else "No recent conversation."
+    except:
+        pass
+    return "No recent conversation."
+
 def get_execution_plan(user_message: str) -> Dict[str, Any]:
     """Analyze the user's message and return an execution plan."""
-    prompt = PLANNER_PROMPT.format(user_message=user_message)
+    recent_context = _get_recent_context()
+    prompt = PLANNER_PROMPT.format(user_message=user_message, recent_context=recent_context)
     
     # Try Phi-3 (local, fast)
     print("[Planner] Trying Phi-3 via Ollama...")

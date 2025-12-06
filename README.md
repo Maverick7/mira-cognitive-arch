@@ -10,6 +10,8 @@
 
 The system is engineered to foster a long-term symbiotic relationship with the user, maintaining a persistent self-narrative, evolving emotional states, and stratified memory (Short-term, Condensed, and Vector-based Long-term Memory).
 
+![MIRA Architecture](assets/mira_architecture.png)
+
 ---
 
 ## 🏛️ System Architecture
@@ -32,12 +34,12 @@ graph TD
     subgraph System 2 [Slow Mode / Council]
         direction TB
         subgraph Parallel Agents
-            Intrinsic[Intrinsic / Right Brain<br>(Empathy & Creativity)]
-            Extrinsic[Extrinsic / Left Brain<br>(Logic & Tools)]
+            Intrinsic["Intrinsic / Right Brain<br>(Empathy & Creativity)"]
+            Extrinsic["Extrinsic / Left Brain<br>(Logic & Tools)"]
             Safety[Safety Monitor]
             Adversarial[Adversarial Critic]
         end
-        Council[Council Synthesis<br>(Consensus Generation)]
+        Council["Council Synthesis<br>(Consensus Generation)"]
     end
     
     Router -- "Casual / Greeting" --> System 1
@@ -71,10 +73,15 @@ The **Extrinsic Agent** can autonomously interact with the external world:
 *   **Computer Vision**: Analyzes uploaded images to "see" the user's context.
 
 ### 2. Stratified Memory System
-Mira utilizes a three-tier memory architecture to solve the "Context Window" problem while retaining long-term coherence:
+Mira utilizes a three-tier memory architecture to solve the "Context Window" problem while retaining long-term coherence. This moves beyond naive RAG (which wastes tokens) towards a compressed **World Model** of the user.
+
 1.  **Working Memory**: Immediate conversation history.
-2.  **Condensed Memory**: Periodically synthesized summaries of key facts and timeline events.
-3.  **Vector Store (RAG)**: Semantic search over the entire history (using `LangChain` + `FAISS` + `HuggingFace Embeddings`).
+2.  **Condensed Memory (`condensed_memory.json`)**: A consolidated "Pattern Graph" of the user. Instead of storing every word, Mira periodically "dreams" to extract:
+    *   **User Profile**: Evolving personality traits and values.
+    *   **Timeline Events**: Significant life milestones (schema-based).
+3.  **Vector Store (RAG)**: Semantic search over the raw archival history.
+
+This approach aligns with modern research on **World Models**—moving from predicting the next token from raw data to predicting states based on a compressed internal representation.
 
 ### 3. Self-Narrative & Emotional State
 Mira maintains a continuous **Internal Monologue** (`self_narrative.jsonl`). She "thinks" about interactions after they happen, updating her internal emotional state (Valence, Anger, Excitement, Dominance). Using specific commands like `/reflect`, the user can trigger this introspective process manually.
@@ -134,15 +141,18 @@ python mira/tools/ingest_history.py /path/to/conversations.json
 # Output: Indexed 1500 conversations into 'data/mira_v3_index'
 ```
 
-### 2. Dream & Consolidate
-Run the **Dreaming Agent** to consolidate raw memories into a structured timeline and user profile. This extracts "Long-term Facts" and "Timeline Events" from your history.
+### 2. Dream & Consolidate (The "Consolidation" Phase)
+Raw RAG is noisy and token-heavy. Run the **Dreaming Agent** to compress thousands of interactions into a structured **Narrative & Profile**.
 
 ```bash
 # Run one-time memory consolidation
 python -m mira.core.dreaming --run-one-time
 ```
 
-Mira will now "know" you, your friends, and your life events without needing to search raw text every time.
+**Why this matters:**
+*   **Context Efficiency:** Instead of retrieving 50 random chunks, Mira loads a precise JSON profile of who you are.
+*   **Temporal Awareness:** It builds a chronological timeline of your life events, solving the "static memory" problem of traditional LLMs.
+*   **Next Frontier:** This is a step towards **Hierarchical Memory Networks**, where data is pattern-matched and condensed, not just retrieved.
 
 ## 🤝 Contribution
 Contributions are welcome!

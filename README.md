@@ -192,6 +192,53 @@ python -m mira.core.dreaming --run-one-time
 *   **Temporal Awareness:** It builds a chronological timeline of your life events, solving the "static memory" problem of traditional LLMs.
 *   **Next Frontier:** This is a step towards **Hierarchical Memory Networks**, where data is pattern-matched and condensed, not just retrieved.
 
+---
+
+## 🔄 ReAct Agent Loop (Multi-Step Reasoning)
+
+When tools are needed, M.I.R.A. uses a **ReAct-style agent loop** for multi-step reasoning:
+
+```mermaid
+graph TD
+    Query([User Query]) --> Think["💭 Thought<br>What do I need?"]
+    Think --> Decide{Need Tool?}
+    
+    Decide -- "Yes" --> Action["⚡ Action<br>web_search / calc"]
+    Action --> Observe["👁️ Observation<br>Tool Result"]
+    Observe --> Think
+    
+    Decide -- "No" --> Answer["✨ Final Answer"]
+    Answer --> Output([Response])
+```
+
+**Example Flow:**
+```
+User: "What's the Man Utd score?"
+Thought: I need to search for the latest match result.
+Action: web_search("Man Utd latest match score")
+Observation: "Man Utd 1-1 West Ham, Dec 4, 2025"
+Thought: I now have the score.
+Final Answer: Manchester United drew 1-1 against West Ham on December 4th.
+```
+
+---
+
+## 📋 Roadmap / TODO
+
+### ✅ Phase 1: Lightweight ReAct (Current)
+- [x] Custom ReAct loop for basic tool calls (web search, calc)
+- [x] Low latency, minimal dependencies
+- [x] Good for portfolio/demo
+
+### 🔮 Phase 2: Smolagents + MCP Integration (Future)
+- [ ] Migrate to [HuggingFace Smolagents](https://huggingface.co/docs/smolagents/en/tutorials/tools)
+- [ ] Integrate [Model Context Protocol (MCP)](https://modelcontextprotocol.io/)
+- [ ] Enable connection to **any MCP server** (GitHub, Slack, Google Drive, etc.)
+- [ ] `MCPClient` handles connection lifecycle, tool discovery
+- [ ] "USB-C for AI" architecture - universal tool connectivity
+
+---
+
 ## 🤝 Contribution
 Contributions are welcome!
 1.  Fork the repo.

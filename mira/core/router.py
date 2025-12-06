@@ -9,6 +9,135 @@ from ..tools.python_exec import run_py
 from ..tools.fs import read_file
 from ..env.corpus_callosum import CorpusCallosumEnv
 
+# ========== REACT AGENT LOOP ==========
+REACT_PROMPT = """You are Mira, an AI assistant with access to tools. You MUST use tools when you don't know something.
+
+## Context:
+{context}
+
+## Available Tools:
+- web_search(query): Search the internet for current information, news, sports scores, weather, etc. USE THIS for any real-time data.
+- calc(expression): Evaluate a math expression (e.g., "sqrt(25) * 5", "0.15 * 85").
+
+## Scratchpad (Your Previous Reasoning):
+{scratchpad}
+
+## User Question: {query}
+
+## CRITICAL INSTRUCTIONS:
+1. For questions about current events, scores, news, weather - you MUST use web_search. Do NOT make up answers.
+2. For math calculations - use calc to be accurate.
+3. You MUST output EXACTLY one of these formats:
+
+**Format A - To use a tool (REQUIRED for real-time info):**
+Thought: [Your reasoning]
+Action: web_search
+Action Input: [search query]
+
+**Format B - Only when you have all info needed:**
+Thought: [Your reasoning]
+Final Answer: [Your response]
+
+IMPORTANT: Do NOT say "let me search" or "I would need to search" - actually call the Action!
+"""
+
+def _react_loop(query: str, context: str, max_iters: int = 3) -> str:
+    """ReAct-style agent loop for multi-step reasoning."""
+    from ..tools.registry import tool_registry
+    from ..models.gemini_client import generate_content
+    import traceback
+    
+    tools = tool_registry()
+    scratchpad = ""
+    
+    try:
+        for i in range(max_iters):
+            prompt = REACT_PROMPT.format(
+                context=context,
+                scratchpad=scratchpad if scratchpad else "(No previous reasoning)",
+                query=query
+            )
+            
+            print(f"\n[ReAct] Iteration {i+1}/{max_iters}")
+            
+            try:
+                response = generate_content(prompt)
+                if not response:
+                    print("[ReAct] Empty response from LLM")
+                    continue
+            except Exception as e:
+                print(f"[ReAct] LLM Error: {e}")
+                return f"I encountered an error while reasoning: {e}"
+            
+            print(f"[ReAct] Response length: {len(response)}")
+            print(f"[ReAct] Response preview: {response[:400]}")
+            
+            # Check for Final Answer
+            if "Final Answer:" in response:
+                final = response.split("Final Answer:")[-1].strip()
+                print(f"[ReAct] ✅ Final Answer reached")
+                return final
+            
+            # Parse Action and Action Input - more flexible regex
+            action_match = re.search(r"Action:\s*(\w+)", response, re.I)
+            # Try multiple patterns for Action Input
+            input_match = re.search(r"Action Input:\s*[\"']?(.+?)[\"']?\s*(?:\n|$)", response, re.I | re.S)
+            if not input_match:
+                input_match = re.search(r"Action Input:\s*(.+)", response, re.I)
+            
+            print(f"[ReAct] Parsed: action_match={action_match}, input_match={input_match}")
+            
+            if action_match:
+                action = action_match.group(1).strip().lower()
+                action_input = input_match.group(1).strip() if input_match else query  # Use query as fallback
+                
+                print(f"[ReAct] Action: {action}({action_input})")
+                
+                # Execute the tool
+                if action in tools:
+                    try:
+                        if action == "web_search":
+                            observation = tools[action](query=action_input)
+                        elif action == "calc":
+                            observation = tools[action](expression=action_input)
+                        else:
+                            observation = str(tools[action](action_input))
+                        
+                        if not observation:
+                            observation = "No results returned."
+                    except Exception as e:
+                        observation = f"Tool Error: {e}"
+                        print(f"[ReAct] Tool Error: {traceback.format_exc()}")
+                else:
+                    observation = f"Unknown tool: {action}. Available: web_search, calc"
+                
+                print(f"[ReAct] Observation: {observation[:300]}...")
+                
+                # Add to scratchpad
+                thought = ""
+                if "Thought:" in response:
+                    thought = response.split("Thought:")[-1].split("Action:")[0].strip()
+                scratchpad += f"\nThought: {thought or 'Analyzing...'}"
+                scratchpad += f"\nAction: {action}"
+                scratchpad += f"\nAction Input: {action_input}"
+                scratchpad += f"\nObservation: {observation}\n"
+            else:
+                # No action found, try to extract any useful content
+                print(f"[ReAct] No action found, treating as direct response")
+                # Clean up the response - remove Thought: prefix if present
+                clean_response = response.replace("Thought:", "").strip()
+                return clean_response
+        
+        # Max iterations reached - synthesize from scratchpad
+        print(f"[ReAct] ⚠️ Max iterations reached, synthesizing answer")
+        return f"Based on my research:\n{scratchpad}"
+        
+    except Exception as e:
+        print(f"[ReAct] Critical Error: {traceback.format_exc()}")
+        return f"I encountered an error: {e}"
+
+# ========== END REACT LOOP ==========
+
 def _parse_left_output(text: str) -> dict:
     """Parse Left hemisphere output. Prefer strict JSON, fallback to heuristics."""
     if not text:
@@ -134,45 +263,28 @@ def process_message(user_message: str) -> str:
     context_block = "\n\n".join(context_parts)
     print(f"[DEBUG] Context loaded: {[p.split(':')[0] for p in context_parts]}")
     
-    # ========== TOOL EXECUTION (if requested) ==========
-    if tool_action := plan.get("tool"):
-        from ..tools.registry import tool_registry
-        tools = tool_registry()
-        if tool_action in tools:
-            print(f"[Router] Executing tool: {tool_action}")
-            try:
-                # Determine args based on tool type
-                if tool_action == "web_search":
-                    tool_result = tools[tool_action](query=user_message)
-                elif tool_action == "calc":
-                    # Extract expression from message
-                    import re
-                    expr_match = re.search(r'[\d\.\+\-\*\/\(\)\s]+', user_message)
-                    expr = expr_match.group().strip() if expr_match else user_message
-                    tool_result = tools[tool_action](expression=expr)
-                else:
-                    tool_result = str(tools[tool_action])
-            except Exception as e:
-                tool_result = f"Error: {e}"
-            context_block += f"\n\n[TOOL RESULT ({tool_action})]:\n{tool_result}"
+    # ========== ROUTING: REACT vs FAST vs COUNCIL ==========
     
-    # ========== ROUTING: FAST vs COUNCIL ==========
+    # If tool is requested, use ReAct loop for multi-step reasoning
+    if plan.get("tool"):
+        print("[DEBUG] Mode: REACT (Multi-step reasoning with tools)")
+        response = _react_loop(user_message, context_block, max_iters=3)
+        
+        # Update emotional state
+        sentiment = analyze_sentiment(user_message)
+        engagement = analyze_engagement(user_message)
+        update_emotion(sentiment, engagement)
+        
+        append_timeline({"user": user_message, "mode": "react", "plan": plan, "final_text": response})
+        return response
+    
+    # Council path for complex queries
     if plan.get("needs_council"):
         print("[DEBUG] Mode: SLOW (Council Cycle)")
         # Proceed to Council logic below
     else:
-        # FAST PATH: Direct response without Council
-        print("[DEBUG] Mode: FAST (Planner decided no Council needed)")
-        
-        # Check if tool was used
-        has_tool_result = plan.get("tool") is not None
-        tool_instruction = ""
-        if has_tool_result:
-            tool_instruction = """
-- IMPORTANT: The [TOOL RESULT] section below contains fresh data from an external source.
-- You MUST use this data to answer the user's question accurately.
-- Cite the sources if available (e.g., "According to [source]...").
-"""
+        # FAST PATH: Direct response without tools or Council
+        print("[DEBUG] Mode: FAST (Simple query)")
         
         fast_prompt = f"""
 You are Mira, a warm and intelligent AI companion.
@@ -185,7 +297,6 @@ INSTRUCTIONS:
 - Respond directly and naturally.
 - Do NOT output JSON.
 - Be concise but helpful.
-{tool_instruction}
 """
         print(f"[DEBUG] Fast Prompt Context Keys: Tool={plan.get('tool')}")
         response = right_mira(user_message, mood=mood, memory_snippets=memory_blob, system_override=fast_prompt)

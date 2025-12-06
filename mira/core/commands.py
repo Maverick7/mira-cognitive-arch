@@ -9,13 +9,7 @@ from .memory import append_fact, FACTS_PATH
 from .mood import set_mood
 
 # Import vector store utilities
-from ..tools.vector_store import (
-    add_documents,
-    load_batch,
-    continue_load,
-    _clear_pending,
-    init_store,
-)
+from ..tools.rag_store import add_texts, init_store
 
 def _tail_lines(path: Path, n: int = 10) -> list[str]:
     if not path.exists():
@@ -23,121 +17,27 @@ def _tail_lines(path: Path, n: int = 10) -> list[str]:
     lines = path.read_text(encoding="utf-8").splitlines()
     return lines[-n:]
 
-# ----------------------------------------------------------------------
-# Helper to load arbitrary JSON files into the vector store (single‑shot)
-# ----------------------------------------------------------------------
-def _load_json_file(path_str: str) -> str:
-    path = Path(path_str).expanduser().resolve()
-    if not path.is_file():
-        return f"[Error] File not found: {path}"
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception as e:
-        return f"[Error] Could not parse JSON: {e}"
-
-    docs = []
-    if isinstance(data, dict):
-        for k, v in data.items():
-            docs.append({"id": f"json_{k}", "text": f"{k}: {v}", "type": "user_json"})
-    elif isinstance(data, list):
-        for i, entry in enumerate(data):
-            docs.append({"id": f"json_{i}", "text": json.dumps(entry), "type": "user_json"})
-    else:
-        return "[Error] JSON must be an object or an array of objects."
-
-    add_documents(docs)
-    return f"[Success] Loaded {len(docs)} records from {path.name} into the vector store."
 
 # ----------------------------------------------------------------------
-# Helper to load timeline/history files (JSONL or JSON) into the vector store
+# Helper to load arbitrary text into the rag store (simple)
 # ----------------------------------------------------------------------
-def _load_history_file(path_str: str) -> str:
-    path = Path(path_str).expanduser().resolve()
-    if not path.is_file():
-        return f"[Error] File not found: {path}"
-    docs = []
-    
-    # Use file modification time as a base "approximate" time if needed
-    import datetime
-    file_mtime = datetime.datetime.fromtimestamp(path.stat().st_mtime)
-    
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            for i, line in enumerate(f):
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    obj = json.load(line)
-                except Exception:
-                    try:
-                        obj = json.loads(line)
-                    except Exception:
-                        obj = {"raw": line}
-                
-                # If timestamp is missing, inject a default one to help the model understand "when" this happened.
-                # We can use a simple index-based offset or just label it as "Past Context".
-                if "timestamp" not in obj and "time" not in obj and "date" not in obj:
-                    # Inject a synthetic timestamp or label
-                    obj["_inferred_context"] = f"Historical entry #{i} from {path.name}"
-                
-                docs.append({"id": f"history_{i}", "text": json.dumps(obj), "type": "history"})
-    except Exception as e:
-        return f"[Error] Could not read file: {e}"
-
-    add_documents(docs)
-    return f"[Success] Loaded {len(docs)} history entries from {path.name}."
-
-# ----------------------------------------------------------------------
-# Batch loading commands for large JSON files
-# ----------------------------------------------------------------------
-def _load_data_batch(path_str: str, batch_size: int = None) -> str:
-    """Load a JSON file in batches. Returns status string.
-    If *batch_size* is None, the default from config (MAX_BATCH_SIZE) is used.
-    """
-    path = Path(path_str).expanduser().resolve()
-    if not path.is_file():
-        return f"[Error] File not found: {path}"
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception as e:
-        return f"[Error] Could not parse JSON: {e}"
-
-    docs = []
-    if isinstance(data, dict):
-        for k, v in data.items():
-            docs.append({"id": f"json_{k}", "text": f"{k}: {v}", "type": "user_json"})
-    elif isinstance(data, list):
-        for i, entry in enumerate(data):
-            docs.append({"id": f"json_{i}", "text": json.dumps(entry), "type": "user_json"})
-    else:
-        return "[Error] JSON must be an object or an array of objects."
-
-    result = load_batch(docs, batch_size=batch_size)
-    return f"[Batch] Processed {result['processed']} chunks, {result['remaining']} remaining. Use /continue_load to finish."
-
-def _continue_load(batch_size: int = None) -> str:
-    """Continue loading any pending chunks from a previous batch."""
-    result = continue_load(batch_size=batch_size)
-    return f"[Batch] Processed {result['processed']} chunks, {result['remaining']} remaining."
+def _load_text_memory(text: str) -> str:
+    """Manual memory injection."""
+    add_texts([text], [{"source": "manual_command", "type": "user_fact"}])
+    return "[Success] Added to M.I.R.A.'s permanent memory."
 
 def _clear_store() -> str:
-    """Delete the FAISS index and any pending chunks – start fresh."""
-    # Remove index files if they exist
+    """Delete the FAISS index - start fresh."""
     try:
-        from ..tools.vector_store import _index_path
-        if _index_path and os.path.exists(_index_path):
-            os.remove(_index_path)
-            meta_path = _index_path + ".meta.json"
-            if os.path.exists(meta_path):
-                os.remove(meta_path)
-    except Exception:
-        pass
-    _clear_pending()
-    init_store()
-    return "[Success] Vector store cleared and re‑initialised."
+        from ..tools import rag_store
+        import shutil
+        if rag_store.INDEX_PATH.exists():
+            shutil.rmtree(rag_store.INDEX_PATH)
+        rag_store.init_store()
+        return "[Success] Vector store cleared and re-initialised."
+    except Exception as e:
+        return f"[Error] clearing store: {e}"
+
 
 def handle_command(line: str) -> Tuple[bool, str]:
     """Handle slash commands. Returns (handled, response)."""
@@ -160,27 +60,14 @@ def handle_command(line: str) -> Tuple[bool, str]:
         if not rows:
             return True, "No facts yet."
         return True, "\n".join(rows)
-    # Load JSON data command (single‑shot)
-    if line.startswith("/load_data "):
-        path = line[len("/load_data "):].strip()
-        return True, _load_json_file(path)
-    # Load history command
-    if line.startswith("/load_history "):
-        path = line[len("/load_history "):].strip()
-        return True, _load_history_file(path)
-    # Batch load command
-    if line.startswith("/load_data_batch "):
-        parts = line.split()
-        if len(parts) >= 2:
-            path = parts[1]
-            batch_size = int(parts[2]) if len(parts) >= 3 else None
-            return True, _load_data_batch(path, batch_size)
-        return True, "[Error] Usage: /load_data_batch <path> [batch_size]"
-    # Continue loading pending chunks
-    if line.startswith("/continue_load"):
-        parts = line.split()
-        batch_size = int(parts[1]) if len(parts) >= 2 else None
-        return True, _continue_load(batch_size)
+    # Load Manual Memory
+    if line.startswith("/remember_text "):
+        text = line[len("/remember_text "):].strip()
+        return True, _load_text_memory(text)
+    
+    # Load history command (Refers user to CLI)
+    if line.startswith("/load_history"):
+        return True, "To ingest history, please run: python mira/tools/ingest_history.py <path_to_json> in your terminal."
     # Clear the vector store
     if line.startswith("/clear_store"):
         return True, _clear_store()

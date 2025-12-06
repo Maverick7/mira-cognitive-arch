@@ -51,7 +51,46 @@ graph TD
     Council --> Output
 ```
 
-### 2. The Council of Experts
+### 2. Meta-Reasoning Planner (ReAct-Inspired)
+Before fetching context or invoking the Council, a **lightweight Planner LLM** (Gemini Flash or local Phi-3) analyzes the query and outputs a structured **Execution Plan**. This implements the [ReAct prompting pattern](https://arxiv.org/abs/2210.03629) (Reasoning + Acting).
+
+```mermaid
+graph LR
+    UserInput([User Query]) --> Planner["🧠 Planner LLM<br>(Gemini Flash / Phi-3)"]
+    
+    Planner -- "JSON Plan" --> Router{Router}
+    
+    subgraph ConditionalFetching [Conditional Context Fetching]
+        Profile["📋 User Profile<br>(condensed_memory.json)"]
+        History["💬 Recent History<br>(last 5 turns)"]
+        RAG["🔍 RAG Search<br>(semantic memory)"]
+        Tools["🔧 Tool Execution<br>(web_search, calc, vision)"]
+    end
+    
+    Router -- "needs_profile" --> Profile
+    Router -- "needs_history" --> History
+    Router -- "needs_rag" --> RAG
+    Router -- "tool: web_search" --> Tools
+    
+    Profile & History & RAG & Tools --> ResponseGen["Response Generator"]
+    ResponseGen -- "Fast Path" --> FastOutput([Direct Response])
+    ResponseGen -- "Slow Path" --> Council["Council Deliberation"]
+    Council --> SlowOutput([Nuanced Response])
+```
+
+**Planner Output Example:**
+```json
+{
+  "reasoning": "User is asking about AirPods we discussed. Needs history.",
+  "needs_profile": false,
+  "needs_history": true,
+  "needs_rag": false,
+  "tool": null,
+  "needs_council": false
+}
+```
+
+### 3. The Council of Experts
 In **Slow Mode**, four specialized agents process the query in parallel (reducing latency via threading):
 
 1.  **Intrinsic Agent (Right Hemisphere)**: Focuses on emotional resonance, values, and the "human" connection.

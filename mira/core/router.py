@@ -73,6 +73,7 @@ def _execute_plan(plan_items: list[str]) -> dict:
     return {"steps": outputs}
 
 import datetime
+from .planner import get_execution_plan
 
 def process_message(user_message: str) -> str:
     ident = load_identity()
@@ -80,65 +81,110 @@ def process_message(user_message: str) -> str:
     # Use dynamic emotional state instead of static mood
     mood = get_mood()  # This applies temporal decay automatically
     emotion_context = get_emotion_context()
-    
-    # 1. Context Injection (Time & RAG)
     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    # Retrieve memories (RAG) - this now uses the vector store if available
-    mem_list = retrieve_memories(user_message, k=10)
-    memory_blob = "\n".join(mem_list) if mem_list else "No relevant memories found."
     
     print(f"\n[DEBUG] Time: {now_str}")
     print(f"[DEBUG] Mood: {mood}")
-    print(f"[DEBUG] Memories Retrieved: {mem_list}")
-
-    # Construct a context block to inject into prompts
-    context_block = f"""
-[CURRENT TIME]: {now_str}
-[USER IDENTITY/MEMORY]:
-{memory_blob}
-{emotion_context}
-"""
-
-    # 2. Fast Mode Heuristic
-    # If message is short (< 10 words) and looks like a greeting/simple ack, skip the heavy cycle.
-    # We use Right Brain (Mira) directly for this.
-    words = user_message.split()
-    is_short = len(words) < 10
-    is_greeting = any(w.lower() in {"hi", "hello", "hey", "ok", "okay", "thanks", "bye", "goodbye"} for w in words)
     
-    if is_short and is_greeting:
-        print("[DEBUG] Mode: FAST")
-        # Fast Path: Direct call to Right Brain with context
+    # ========== META-REASONING PLANNER ==========
+    plan = get_execution_plan(user_message)
+    print(f"[Planner] Plan: {plan}")
+    
+    # ========== CONDITIONAL CONTEXT FETCHING ==========
+    context_parts = [f"[CURRENT TIME]: {now_str}", f"[EMOTIONAL CONTEXT]: {emotion_context}"]
+    
+    # Fetch Profile only if needed
+    if plan.get("needs_profile"):
+        from .memory import DATA_DIR
+        condensed_mem_path = DATA_DIR / "condensed_memory.json"
+        if condensed_mem_path.exists():
+            condensed_profile = condensed_mem_path.read_text(encoding="utf-8")
+            # Truncate if too long
+            if len(condensed_profile) > 2000:
+                condensed_profile = condensed_profile[:2000] + "..."
+            context_parts.append(f"[USER PROFILE]:\n{condensed_profile}")
+    
+    # Fetch Recent History only if needed
+    if plan.get("needs_history"):
+        from .memory import TIMELINE_PATH
+        try:
+            if TIMELINE_PATH.exists():
+                import json as json_mod
+                lines = TIMELINE_PATH.read_text(encoding="utf-8").splitlines()[-5:]
+                rh = []
+                for ln in lines:
+                    try:
+                        obj = json_mod.loads(ln)
+                        rh.append(f"User: {obj.get('user','')}\nMira: {obj.get('final_text','')}")
+                    except: pass
+                recent_history = "\n\n".join(rh)
+                if recent_history:
+                    context_parts.append(f"[RECENT CONVERSATION]:\n{recent_history}")
+        except: pass
+    
+    # Fetch RAG only if needed
+    memory_blob = ""
+    if plan.get("needs_rag"):
+        mem_list = retrieve_memories(user_message, k=10)
+        memory_blob = "\n".join(mem_list) if mem_list else ""
+        if memory_blob:
+            context_parts.append(f"[RELEVANT MEMORIES (RAG)]:\n{memory_blob}")
+    
+    # Assemble context block
+    context_block = "\n\n".join(context_parts)
+    print(f"[DEBUG] Context loaded: {[p.split(':')[0] for p in context_parts]}")
+    
+    # ========== TOOL EXECUTION (if requested) ==========
+    if tool_action := plan.get("tool"):
+        from ..tools.registry import tool_registry
+        tools = tool_registry()
+        if tool_action in tools:
+            print(f"[Router] Executing tool: {tool_action}")
+            try:
+                # Determine args based on tool type
+                if tool_action == "web_search":
+                    tool_result = tools[tool_action](query=user_message)
+                elif tool_action == "calc":
+                    # Extract expression from message
+                    import re
+                    expr_match = re.search(r'[\d\.\+\-\*\/\(\)\s]+', user_message)
+                    expr = expr_match.group().strip() if expr_match else user_message
+                    tool_result = tools[tool_action](expression=expr)
+                else:
+                    tool_result = str(tools[tool_action])
+            except Exception as e:
+                tool_result = f"Error: {e}"
+            context_block += f"\n\n[TOOL RESULT ({tool_action})]:\n{tool_result}"
+    
+    # ========== ROUTING: FAST vs COUNCIL ==========
+    if plan.get("needs_council"):
+        print("[DEBUG] Mode: SLOW (Council Cycle)")
+        # Proceed to Council logic below
+    else:
+        # FAST PATH: Direct response without Council
+        print("[DEBUG] Mode: FAST (Planner decided no Council needed)")
         fast_prompt = f"""
-You are Mira, a warm and emotionally intelligent AI companion.
-You have access to the following context about the user and yourself:
+You are Mira, a warm and intelligent AI companion.
+CONTEXT:
 {context_block}
 
 INSTRUCTIONS:
 - The user said: "{user_message}"
-- Respond naturally, warmly, and briefly.
+- Respond directly and naturally.
 - Do NOT output JSON.
-- Do NOT say "As an AI".
-- Use the context if relevant (e.g. if they say "Hi" and it's late, say "Good evening").
-
-MOOD/PERSONALITY:
-- Look at your [EMOTIONAL STATE] above.
-- Embody this mood in your response!
-- If "playful", be witty and light. If "tired", be soft. If "excited", be energetic!
+- Be concise but helpful.
 """
         response = right_mira(user_message, mood=mood, memory_snippets=memory_blob, system_override=fast_prompt)
         
-        # Update emotional state based on user's message
+        # Update emotional state
         sentiment = analyze_sentiment(user_message)
         engagement = analyze_engagement(user_message)
         update_emotion(sentiment, engagement)
         
-        append_timeline({"user": user_message, "mode": "fast", "final_text": response})
+        append_timeline({"user": user_message, "mode": "fast", "plan": plan, "final_text": response})
         return response
-
-    print("[DEBUG] Mode: SLOW (Council Cycle)")
     
-    # 3. Parallel Council Execution
+    # ========== SLOW PATH: COUNCIL ==========
     # We construct the prompts for all experts simultaneously using the same context.
     # Note: intrinsic gets a slightly different prompt format (Right Brain) than others (Left Brain).
     

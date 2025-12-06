@@ -27,13 +27,13 @@ The system dynamically selects a cognitive path based on query complexity:
 graph TD
     User([User Input]) --> Router{Router / Corpus Callosum}
     
-    subgraph System 1 [Fast Mode]
+    subgraph System1 [Fast Mode]
         Fast[Direct LLM Response]
     end
     
-    subgraph System 2 [Slow Mode / Council]
+    subgraph System2 [Slow Mode / Council]
         direction TB
-        subgraph Parallel Agents
+        subgraph ParallelAgents [Parallel Agents]
             Intrinsic["Intrinsic / Right Brain<br>(Empathy & Creativity)"]
             Extrinsic["Extrinsic / Left Brain<br>(Logic & Tools)"]
             Safety[Safety Monitor]
@@ -42,13 +42,12 @@ graph TD
         Council["Council Synthesis<br>(Consensus Generation)"]
     end
     
-    Router -- "Casual / Greeting" --> System 1
-    Router -- "Complex / Emotional" --> System 2
+    Router -- "Casual / Greeting" --> Fast
+    Router -- "Complex / Emotional" --> Intrinsic & Extrinsic & Safety & Adversarial
     
-    System 1 --> Output([Final Response])
+    Fast --> Output([Final Response])
     
-    Router --> Parallel Agents
-    Parallel Agents --> Council
+    Intrinsic & Extrinsic & Safety & Adversarial --> Council
     Council --> Output
 ```
 
